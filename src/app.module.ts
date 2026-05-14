@@ -26,6 +26,7 @@ import { CellScopeGuard } from "./common/guards/cell-scope.guard";
 // Modules
 import { AppController } from "./app.controller";
 import { AppService } from "./app.service";
+import { PrismaModule } from "./database/prisma.module";
 import { AuthModule } from "./modules/auth/auth.module";
 import { UsersModule } from "./modules/users/users.module";
 import { CellsModule } from "./modules/cells/cells.module";
@@ -51,9 +52,12 @@ import { AuditLog } from "./modules/audit/entities/audit-log.entity";
     }),
 
     // Database
-    TypeOrmModule.forRootAsync({
-      useFactory: () => databaseConfig(),
-    }),
+    // TypeOrmModule.forRootAsync({
+    //   useFactory: () => databaseConfig(),
+    // }),
+
+    // Prisma (new ORM - replacing TypeORM)
+    PrismaModule,
 
     // Keycloak
     KeycloakConnectModule.registerAsync({
@@ -61,21 +65,21 @@ import { AuditLog } from "./modules/audit/entities/audit-log.entity";
     }),
 
     // TypeORM features for global interceptors
-    TypeOrmModule.forFeature([AuditLog]),
+    // TypeOrmModule.forFeature([AuditLog]), // Temporarily disabled - migrating to Prisma
 
     // Feature Modules
     QueuesModule,
     AuthModule,
-    UsersModule,
-    CellsModule,
-    ClioModule,
-    CasesModule,
-    ComplianceModule,
-    AuditModule,
-    FundingModule,
-    InsuranceModule,
-    DashboardModule,
-    NotificationsModule,
+    // UsersModule, // Temporarily disabled - needs Prisma migration
+    // CellsModule, // Temporarily disabled - needs Prisma migration
+    // ClioModule, // Temporarily disabled - needs Prisma migration
+    // CasesModule, // Temporarily disabled - needs Prisma migration
+    // ComplianceModule, // Temporarily disabled - needs Prisma migration
+    // AuditModule, // Temporarily disabled - needs Prisma migration
+    // FundingModule, // Temporarily disabled - needs Prisma migration
+    // InsuranceModule, // Temporarily disabled - needs Prisma migration
+    // DashboardModule, // Temporarily disabled - depends on other modules
+    // NotificationsModule, // Temporarily disabled - depends on other modules
   ],
   controllers: [AppController],
   providers: [
@@ -95,10 +99,10 @@ import { AuditLog } from "./modules/audit/entities/audit-log.entity";
       useClass: ResourceGuard, // Keycloak resource guard
     },
     // Global Interceptor
-    {
-      provide: APP_INTERCEPTOR,
-      useClass: AuditLogInterceptor,
-    },
+    // {
+    //   provide: APP_INTERCEPTOR,
+    //   useClass: AuditLogInterceptor, // Temporarily disabled - requires TypeORM migration
+    // },
   ],
 })
 export class AppModule implements NestModule {

@@ -1,16 +1,12 @@
 import { Injectable } from "@nestjs/common";
-import { InjectRepository } from "@nestjs/typeorm";
-import { Repository } from "typeorm";
 import { JwtPayload } from "../../common/types/jwt-payload.types";
-import { User } from "../users/entities/user.entity";
+import { PrismaService } from "../../database/prisma.service";
 import { UserProfileDto } from "./dto/user-profile.dto";
+import { User, UserRole } from "@prisma/client";
 
 @Injectable()
 export class AuthService {
-  constructor(
-    @InjectRepository(User)
-    private userRepository: Repository<User>,
-  ) {}
+  constructor(private prisma: PrismaService) {}
 
   /**
    * Sync user from Keycloak JWT token to database
@@ -19,29 +15,33 @@ export class AuthService {
   async syncUserFromToken(jwtPayload: JwtPayload): Promise<User> {
     const keycloakId = jwtPayload.sub;
 
-    // Find existing user by keycloak_id
-    let user = await this.userRepository.findOne({
-      where: { keycloak_id: keycloakId },
+    // Find existing user by keycloakId
+    let user = await this.prisma.user.findUnique({
+      where: { keycloakId },
     });
 
     if (!user) {
       // Create new user from JWT payload
-      const role = jwtPayload.realm_access?.roles[0] || "cell_paralegal";
+      const role = (jwtPayload.realm_access?.roles.find(r => 
+        Object.values(UserRole).includes(r as UserRole)
+      ) || 'cell_paralegal') as UserRole;
 
-      user = this.userRepository.create({
-        keycloak_id: keycloakId,
-        email: jwtPayload.email,
-        full_name: jwtPayload.name,
-        role: role as any,
-        cell_id: jwtPayload.cell_id || null,
-        is_active: true,
+      user = await this.prisma.user.create({
+        data: {
+          keycloakId,
+          email: jwtPayload.email,
+          fullName: jwtPayload.name,
+          role,
+          cellId: jwtPayload.cell_id || null,
+          fundedCellIds: jwtPayload.funded_cell_ids || [],
+        },
       });
-
-      await this.userRepository.save(user);
     } else {
-      // Update last login
-      user.updated_at = new Date();
-      await this.userRepository.save(user);
+      // Update timestamp
+      user = await this.prisma.user.update({
+        where: { id: user.id },
+        data: { updatedAt: new Date() },
+      });
     }
 
     return user;

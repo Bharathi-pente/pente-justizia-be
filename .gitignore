@@ -63,3 +63,5 @@ Thumbs.db
 .npm
 .yarn
 .pnpm-store
+
+/generated/prisma

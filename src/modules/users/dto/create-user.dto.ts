@@ -5,13 +5,11 @@ import {
   IsUUID,
   IsOptional,
   IsBoolean,
+  IsInt,
 } from "class-validator";
-import { UserRole } from "../entities/user.entity";
+import { UserRole, ConsentStatus, OnboardingStatus, ClientType } from "../entities/user.entity";
 
 export class CreateUserDto {
-  @IsString()
-  keycloak_id: string;
-
   @IsEmail()
   email: string;
 
@@ -22,10 +20,55 @@ export class CreateUserDto {
   role: UserRole;
 
   @IsOptional()
+  @IsString()
+  password?: string;
+
+  @IsOptional()
   @IsUUID()
   cell_id?: string;
 
+  // Client / Contact Variables
+  @IsOptional()
+  @IsString()
+  client_name?: string;
+
+  @IsOptional()
+  @IsString()
+  phone?: string;
+
+  @IsOptional()
+  @IsString()
+  address?: string;
+
+  @IsOptional()
+  @IsEnum(ConsentStatus)
+  consent_status?: ConsentStatus;
+
   @IsOptional()
   @IsBoolean()
-  is_active?: boolean;
+  gdpr_status?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  verification_status?: boolean;
+
+  @IsOptional()
+  @IsEnum(OnboardingStatus)
+  onboarding_status?: OnboardingStatus;
+
+  @IsOptional()
+  @IsInt()
+  linked_case_count?: number;
+
+  @IsOptional()
+  @IsEnum(ClientType)
+  client_type?: ClientType;
+
+  @IsOptional()
+  @IsBoolean()
+  vulnerability_flag?: boolean;
+
+  @IsOptional()
+  @IsString()
+  preferred_contact_method?: string;
 }

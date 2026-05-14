@@ -1,0 +1,373 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// ENUMS
+// ============================================
+
+enum UserRole {
+  hq_admin
+  hq_compliance
+  hq_bdm
+  cell_admin
+  cell_solicitor
+  cell_paralegal
+  funder
+  insurer
+}
+
+enum ConsentStatus {
+  PENDING
+  GRANTED
+  DENIED
+}
+
+enum OnboardingStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  COMPLETED
+}
+
+enum ClientType {
+  INDIVIDUAL
+  CORPORATE
+  GOVERNMENT
+  NON_PROFIT
+}
+
+enum CaseStatus {
+  IN_PROGRESS
+  SETTLED
+  WON
+  LOST
+  ABANDONED
+}
+
+enum CaseType {
+  PI_RTA
+  PI_OTHER
+  CLINICAL_NEGLIGENCE
+  EMPLOYMENT
+  COMMERCIAL
+}
+
+enum IssueSeverity {
+  CRITICAL
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum IssueStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+enum PendingUserStatus {
+  pending
+  approved
+  rejected
+}
+
+// ============================================
+// MODELS
+// ============================================
+
+model User {
+  id                    String           @id @default(uuid())
+  keycloakId            String           @unique @map("keycloak_id")
+  email                 String           @unique
+  fullName              String           @map("full_name")
+  role                  UserRole
+  cellId                String?          @map("cell_id")
+  fundedCellIds         String[]         @map("funded_cell_ids")
+  createdAt             DateTime         @default(now()) @map("created_at")
+  updatedAt             DateTime         @updatedAt @map("updated_at")
+
+  // Client / Contact Variables
+  clientName            String?          @map("client_name")
+  phone                 String?          @map("phone")
+  address               String?          @map("address")
+  consentStatus         ConsentStatus?   @map("consent_status")
+  gdprStatus            Boolean          @default(false) @map("gdpr_status")
+  verificationStatus    Boolean          @default(false) @map("verification_status")
+  onboardingStatus      OnboardingStatus @default(NOT_STARTED) @map("onboarding_status")
+  linkedCaseCount       Int              @default(0) @map("linked_case_count")
+  clientType            ClientType?      @map("client_type")
+  vulnerabilityFlag     Boolean          @default(false) @map("vulnerability_flag")
+  preferredContactMethod String?         @map("preferred_contact_method")
+
+  // Relations
+  cell                  Cell?            @relation(fields: [cellId], references: [id])
+  casesCreated          Case[]           @relation("CaseCreatedBy")
+  auditSchedulesCreated AuditSchedule[]  @relation("AuditScheduleCreatedBy")
+  complianceIssues      ComplianceIssue[]
+  auditReports          AuditReport[]
+  invitationsSent       Invitation[]      @relation("InvitationsSent")
+  approvedUsers         PendingUser[]    @relation("UserApprovals")
+
+  @@map("users")
+}
+
+model Cell {
+  id              String   @id @default(uuid())
+  name            String
+  operatorEmail   String   @map("operator_email")
+  operatorName    String   @map("operator_name")
+  primaryContact  String   @map("primary_contact")
+  addressLine1    String   @map("address_line_1")
+  addressLine2    String?  @map("address_line_2")
+  city            String
+  postcode        String
+  clioConnected   Boolean  @default(false) @map("clio_connected")
+  lastClioSyncAt  DateTime? @map("last_clio_sync_at")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  users           User[]
+  cases           Case[]
+  auditSchedules  AuditSchedule[]
+  clioCredentials ClioCredential[]
+  fundingRequests FundingRequest[]
+  atePolicies     ATEPolicy[]
+
+  @@map("cells")
+}
+
+model Case {
+  id                     String     @id @default(uuid())
+  clioId                 String?    @unique @map("clio_id")
+  cellId                 String     @map("cell_id")
+  clientName             String     @map("client_name")
+  caseReference          String     @unique @map("case_reference")
+  caseType               CaseType   @map("case_type")
+  status                 CaseStatus
+  dateOpened             DateTime   @map("date_opened")
+  dateClosed             DateTime?  @map("date_closed")
+  estimatedValue         Decimal    @map("estimated_value") @db.Decimal(12, 2)
+  settledAmount          Decimal?   @map("settled_amount") @db.Decimal(12, 2)
+  solicitorAssigned      String?    @map("solicitor_assigned")
+  defendantName          String?    @map("defendant_name")
+  defendantInsurer       String?    @map("defendant_insurer")
+  hasATE                 Boolean    @default(false) @map("has_ate")
+  hasFunding             Boolean    @default(false) @map("has_funding")
+  createdBy              String     @map("created_by")
+  createdAt              DateTime   @default(now()) @map("created_at")
+  updatedAt              DateTime   @updatedAt @map("updated_at")
+
+  // Relations
+  cell                   Cell                @relation(fields: [cellId], references: [id])
+  creator                User                @relation("CaseCreatedBy", fields: [createdBy], references: [id])
+  fundingRequests        FundingRequest[]
+  atePolicies            ATEPolicy[]
+  claimEvents            ClaimEvent[]
+
+  @@map("cases")
+}
+
+model AuditSchedule {
+  id               String   @id @default(uuid())
+  cellId           String   @map("cell_id")
+  auditDate        DateTime @map("audit_date")
+  auditType        String   @map("audit_type")
+  auditorName      String   @map("auditor_name")
+  status           String   @default("scheduled")
+  notes            String?
+  createdBy        String   @map("created_by")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  cell             Cell     @relation(fields: [cellId], references: [id])
+  creator          User     @relation("AuditScheduleCreatedBy", fields: [createdBy], references: [id])
+  reports          AuditReport[]
+
+  @@map("audit_schedules")
+}
+
+model SRAChecklist {
+  id               String   @id @default(uuid())
+  checklistName    String   @map("checklist_name")
+  description      String?
+  requiredFrequency String  @map("required_frequency")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  @@map("sra_checklists")
+}
+
+model ComplianceIssue {
+  id               String         @id @default(uuid())
+  title            String
+  description      String
+  severity         IssueSeverity
+  status           IssueStatus
+  raisedBy         String         @map("raised_by")
+  assignedTo       String?        @map("assigned_to")
+  dueDate          DateTime?      @map("due_date")
+  resolvedAt       DateTime?      @map("resolved_at")
+  createdAt        DateTime       @default(now()) @map("created_at")
+  updatedAt        DateTime       @updatedAt @map("updated_at")
+
+  // Relations
+  raisedByUser     User           @relation(fields: [raisedBy], references: [id])
+
+  @@map("compliance_issues")
+}
+
+model AuditReport {
+  id               String        @id @default(uuid())
+  auditScheduleId  String        @map("audit_schedule_id")
+  reportedBy       String        @map("reported_by")
+  complianceScore  Int           @map("compliance_score")
+  findings         String
+  recommendations  String
+  createdAt        DateTime      @default(now()) @map("created_at")
+  updatedAt        DateTime      @updatedAt @map("updated_at")
+
+  // Relations
+  auditSchedule    AuditSchedule @relation(fields: [auditScheduleId], references: [id])
+  reporter         User          @relation(fields: [reportedBy], references: [id])
+
+  @@map("audit_reports")
+}
+
+model ClioCredential {
+  id               String    @id @default(uuid())
+  cellId           String    @map("cell_id")
+  accessToken      String    @map("access_token")
+  refreshToken     String    @map("refresh_token")
+  expiresAt        DateTime  @map("expires_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  cell             Cell      @relation(fields: [cellId], references: [id])
+
+  @@map("clio_credentials")
+}
+
+model FundingRequest {
+  id                  String   @id @default(uuid())
+  caseId              String   @map("case_id")
+  cellId              String   @map("cell_id")
+  amountRequested     Decimal  @map("amount_requested") @db.Decimal(12, 2)
+  requestedAt         DateTime @default(now()) @map("requested_at")
+  approvedAt          DateTime? @map("approved_at")
+  status              String   @default("pending")
+  approvedBy          String?  @map("approved_by")
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  case                Case     @relation(fields: [caseId], references: [id])
+  cell                Cell     @relation(fields: [cellId], references: [id])
+  disbursements       DisbursementSchedule[]
+
+  @@map("funding_requests")
+}
+
+model DisbursementSchedule {
+  id               String         @id @default(uuid())
+  fundingRequestId String         @map("funding_request_id")
+  amount           Decimal        @db.Decimal(12, 2)
+  dueDate          DateTime       @map("due_date")
+  paidAt           DateTime?      @map("paid_at")
+  status           String         @default("pending")
+  createdAt        DateTime       @default(now()) @map("created_at")
+  updatedAt        DateTime       @updatedAt @map("updated_at")
+
+  // Relations
+  fundingRequest   FundingRequest @relation(fields: [fundingRequestId], references: [id])
+
+  @@map("disbursement_schedules")
+}
+
+model ATEPolicy {
+  id               String   @id @default(uuid())
+  caseId           String   @map("case_id")
+  cellId           String   @map("cell_id")
+  policyNumber     String   @unique @map("policy_number")
+  provider         String
+  coverAmount      Decimal  @map("cover_amount") @db.Decimal(12, 2)
+  premium          Decimal  @db.Decimal(12, 2)
+  inceptionDate    DateTime @map("inception_date")
+  expiryDate       DateTime @map("expiry_date")
+  active           Boolean  @default(true)
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  case             Case     @relation(fields: [caseId], references: [id])
+  cell             Cell     @relation(fields: [cellId], references: [id])
+
+  @@map("ate_policies")
+}
+
+model ClaimEvent {
+  id               String   @id @default(uuid())
+  caseId           String   @map("case_id")
+  eventType        String   @map("event_type")
+  eventDate        DateTime @map("event_date")
+  description      String
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  case             Case     @relation(fields: [caseId], references: [id])
+
+  @@map("claim_events")
+}
+
+model Invitation {
+  id         String   @id @default(uuid())
+  email      String   @unique
+  token      String
+  role       UserRole
+  cellId     String?  @map("cell_id")
+  invitedBy  String   @map("invited_by")
+  message    String?
+  expiresAt  DateTime @map("expires_at")
+  used       Boolean  @default(false)
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  inviter    User     @relation("InvitationsSent", fields: [invitedBy], references: [id])
+
+  @@map("invitations")
+}
+
+model PendingUser {
+  id              String            @id @default(uuid())
+  email           String            @unique
+  firstName       String            @map("first_name")
+  lastName        String            @map("last_name")
+  organization    String
+  requestedRole   UserRole          @map("requested_role")
+  status          PendingUserStatus @default(pending)
+  keycloakUserId  String?           @unique @map("keycloak_user_id")
+  rejectionReason String?           @map("rejection_reason")
+  approvedBy      String?           @map("approved_by")
+  approvedAt      DateTime?         @map("approved_at")
+  createdAt       DateTime          @default(now()) @map("created_at")
+  updatedAt       DateTime          @updatedAt @map("updated_at")
+
+  // Relations
+  approver        User?             @relation("UserApprovals", fields: [approvedBy], references: [id])
+
+  @@map("pending_users")
+}
+
