@@ -16,14 +16,14 @@ export class RegistrationService {
   ) {}
 
   /**
-   * WORKFLOW 1: Admin creates HQ user directly
-   * HQ admins can create HQ users without invitation
+   * WORKFLOW 1: Admin creates user directly
+   * HQ admins can create any type of user
    */
   async createUserByAdmin(adminId: string, dto: RegisterUserDto) {
-    // Validate role - only HQ roles allowed
-    const validRoles: UserRole[] = ['hq_admin', 'hq_compliance', 'hq_bdm'];
+    // Validate that the role is a valid UserRole enum value
+    const validRoles = Object.values(UserRole);
     if (!validRoles.includes(dto.role as UserRole)) {
-      throw new BadRequestException('Only HQ roles can be created by admin');
+      throw new BadRequestException('Invalid role specified');
     }
 
     // Create user in Keycloak
@@ -349,6 +349,29 @@ export class RegistrationService {
    */
   async getTotalUsers(): Promise<number> {
     return this.prisma.user.count();
+  }
+
+  /**
+   * Get all users
+   */
+  async getAllUsers() {
+    return this.prisma.user.findMany({
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        email: true,
+        fullName: true,
+        role: true,
+        cellId: true,
+        createdAt: true,
+        cell: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+      },
+    });
   }
 
   /**

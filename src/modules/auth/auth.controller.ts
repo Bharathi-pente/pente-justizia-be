@@ -115,6 +115,17 @@ export class AuthController {
   }
 
   /**
+   * GET /auth/users
+   * Get all users (HQ admin only)
+   */
+  @Get("users")
+  @UseGuards(KeycloakAuthGuard, RolesGuard)
+  @Roles("hq_admin")
+  async getAllUsers() {
+    return this.registrationService.getAllUsers();
+  }
+
+  /**
    * GET /auth/pending-users
    * List pending user approvals (HQ admin only)
    */
