@@ -1,0 +1,269 @@
+generator client {
+  provider     = "prisma-client"
+  output       = "../generated/prisma"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum CellStatus {
+  PENDING_CONNECTION
+  CONNECTED
+  SYNCING
+  SYNC_FAILED
+  DISCONNECTED
+  ARCHIVED
+}
+
+enum SyncEntity {
+  MATTERS
+  CONTACTS
+  BILLS
+  TASKS
+  DOCUMENTS
+  ACTIVITIES
+}
+
+enum SyncStatus {
+  RUNNING
+  COMPLETED
+  FAILED
+  PARTIAL
+}
+
+// ─── Core ─────────────────────────────────────────────────────────────────────
+
+model Cell {
+  id        String     @id @default(uuid())
+  name      String
+  status    CellStatus @default(PENDING_CONNECTION)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  token     CellToken?
+  matters   Matter[]
+  contacts  Contact[]
+  bills     Bill[]
+  tasks     Task[]
+  documents Document[]
+  activities Activity[]
+  syncLogs  SyncLog[]
+}
+
+model CellToken {
+  id                    String   @id @default(uuid())
+  cellId                String   @unique
+  encryptedAccessToken  String
+  encryptedRefreshToken String
+  expiresAt             DateTime
+  clioBaseUrl           String   @default("https://app.clio.com")
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  cell Cell @relation(fields: [cellId], references: [id], onDelete: Cascade)
+}
+
+// ─── Sync Tracking ───────────────────────────────────────────────────────────
+
+model SyncLog {
+  id              String     @id @default(uuid())
+  cellId          String
+  entity          SyncEntity
+  status          SyncStatus @default(RUNNING)
+  recordsFetched  Int        @default(0)
+  recordsUpserted Int        @default(0)
+  errorMessage    String?
+  startedAt       DateTime   @default(now())
+  completedAt     DateTime?
+
+  cell Cell @relation(fields: [cellId], references: [id], onDelete: Cascade)
+
+  @@index([cellId, entity])
+  @@index([cellId, startedAt])
+}
+
+
+model Stage {
+  id          String   @id
+  name        String   @unique
+  order       Int
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  matters     Matter[]
+}
+
+// ─── Matters ─────────────────────────────────────────────────────────────────
+
+model Matter {
+  id            String    @id @default(uuid())
+  cellId        String
+  clioMatterId  String
+  title         String
+  status        String
+  stage         String?
+
+   // ── New fields ──────────────────────────────
+  normalizedStage    String?   // derived: INTAKE/LOC/AWAITING etc
+  resolutionStatus   String?   // derived: OPEN/CLOSED/SETTLED
+  outcomeType        String?   // derived: Won/Lost/Settled/Withdrawn
+  limitationDate     DateTime? // from Clio custom_field_values
+  courtDeadline      DateTime? // derived from Tasks
+  responseDeadline   DateTime? // derived from Tasks
+  proceduralDeadline DateTime? // derived from Tasks
+  retentionUntil     DateTime? // calculated: closeDate + 7 years
+  dataConflictFlag   Boolean   @default(false)
+  ownerUserId        String?   // Clio responsible attorney id
+  sourceSystem       String?   @default("CLIO") // always CLIO
+  stageId            String?      // internal stage number 1-6
+  resolutionNotes    String?   // manual entry
+  // ────────────────────────────────────────────
+  description   String?
+  clientName    String?
+  practiceArea  String?
+  openDate      DateTime?
+  closeDate     DateTime?
+  syncedAt      DateTime  @default(now())
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  cell       Cell            @relation(fields: [cellId], references: [id], onDelete: Cascade)
+  stage_ref   Stage?   @relation(fields: [stageId], references: [id])
+  contacts   MatterContact[]
+  bills      Bill[]
+  tasks      Task[]
+  documents  Document[]
+  activities Activity[]
+
+  @@unique([cellId, clioMatterId])
+  @@index([cellId, status])
+  @@index([cellId, openDate])
+}
+
+model MatterContact {
+  id        String  @id @default(uuid())
+  matterId  String
+  contactId String
+  role      String? // e.g. "client", "opposing_party", "witness"
+
+  matter  Matter  @relation(fields: [matterId], references: [id], onDelete: Cascade)
+  contact Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@unique([matterId, contactId])
+}
+
+// ─── Contacts ────────────────────────────────────────────────────────────────
+
+model Contact {
+  id             String   @id @default(uuid())
+  cellId         String
+  clioContactId  String
+  name           String
+  type           String   @default("Person")
+  email          String?
+  phone          String?
+  city           String?
+  country        String?
+  syncedAt       DateTime @default(now())
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  cell    Cell            @relation(fields: [cellId], references: [id], onDelete: Cascade)
+  matters MatterContact[]
+
+  @@unique([cellId, clioContactId])
+  @@index([cellId])
+}
+
+// ─── Bills ───────────────────────────────────────────────────────────────────
+
+model Bill {
+  id          String    @id @default(uuid())
+  cellId      String
+  matterId    String?
+  clioBillId  String
+  status      String    // "draft" | "pending" | "paid" | "void"
+  total       Decimal   @default(0) @db.Decimal(12, 2)
+  paid        Decimal   @default(0) @db.Decimal(12, 2)
+  due         Decimal   @default(0) @db.Decimal(12, 2)
+  issuedDate  DateTime?
+  dueDate     DateTime?
+  syncedAt    DateTime  @default(now())
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  cell   Cell    @relation(fields: [cellId], references: [id], onDelete: Cascade)
+  matter Matter? @relation(fields: [matterId], references: [id], onDelete: SetNull)
+
+  @@unique([cellId, clioBillId])
+  @@index([cellId, status])
+  @@index([cellId, matterId])
+}
+
+// ─── Tasks ───────────────────────────────────────────────────────────────────
+
+model Task {
+  id           String    @id @default(uuid())
+  cellId       String
+  matterId     String?
+  clioTaskId   String
+  name         String
+  status       String    // "incomplete" | "complete"
+  priority     String?
+  dueDate      DateTime?
+  assigneeName String?
+  syncedAt     DateTime  @default(now())
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  cell   Cell    @relation(fields: [cellId], references: [id], onDelete: Cascade)
+  matter Matter? @relation(fields: [matterId], references: [id], onDelete: SetNull)
+
+  @@unique([cellId, clioTaskId])
+  @@index([cellId, status])
+}
+
+// ─── Documents ───────────────────────────────────────────────────────────────
+
+model Document {
+  id              String   @id @default(uuid())
+  cellId          String
+  matterId        String?
+  clioDocumentId  String
+  name            String
+  category        String?
+  versionCount    Int      @default(1)
+  syncedAt        DateTime @default(now())
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  cell   Cell    @relation(fields: [cellId], references: [id], onDelete: Cascade)
+  matter Matter? @relation(fields: [matterId], references: [id], onDelete: SetNull)
+
+  @@unique([cellId, clioDocumentId])
+  @@index([cellId, matterId])
+}
+
+// ─── Activities ───────────────────────────────────────────────────────────────
+
+model Activity {
+  id              String   @id @default(uuid())
+  cellId          String
+  matterId        String?
+  clioActivityId  String
+  type            String   // "TimeEntry" | "ExpenseEntry" | "FlatFee"
+  summary         String?
+  quantity        Decimal  @default(0) @db.Decimal(10, 2)
+  activityDate    DateTime?
+  syncedAt        DateTime @default(now())
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  cell   Cell    @relation(fields: [cellId], references: [id], onDelete: Cascade)
+  matter Matter? @relation(fields: [matterId], references: [id], onDelete: SetNull)
+
+  @@unique([cellId, clioActivityId])
+  @@index([cellId, matterId])
+}
