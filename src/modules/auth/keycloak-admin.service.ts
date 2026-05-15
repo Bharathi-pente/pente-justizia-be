@@ -94,6 +94,17 @@ export class KeycloakAdminService {
 
       return userId!;
     } catch (error: any) {
+      console.error('Keycloak user creation error:', error.response?.data);
+      
+      // Check if user already exists
+      const errorMessage = error.response?.data?.errorMessage || '';
+      if (errorMessage.includes('exists') || errorMessage.includes('already') || error.response?.status === 409) {
+        throw new HttpException(
+          'User already exists with this email',
+          HttpStatus.CONFLICT,
+        );
+      }
+      
       throw new HttpException(
         error.response?.data?.errorMessage || 'Failed to create user in Keycloak',
         HttpStatus.INTERNAL_SERVER_ERROR,
@@ -126,9 +137,32 @@ export class KeycloakAdminService {
   }
 
   /**
-   * Assign a role to a user
+   * Get user's realm roles
    */
-  async assignRole(userId: string, roleName: string): Promise<void> {
+  async getUserRoles(userId: string): Promise<any[]> {
+    const token = await this.getAdminToken();
+
+    try {
+      const response = await axios.get(
+        `${this.keycloakUrl}/admin/realms/${this.realm}/users/${userId}/role-mappings/realm`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        },
+      );
+
+      return response.data || [];
+    } catch (error) {
+      throw new HttpException(
+        'Failed to fetch user roles',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  /**
+   * Remove a role from a user
+   */
+  async removeRole(userId: string, roleName: string): Promise<void> {
     const token = await this.getAdminToken();
 
     try {
@@ -140,7 +174,55 @@ export class KeycloakAdminService {
         },
       );
 
-      // Assign role to user
+      // Remove role from user
+      await axios.delete(
+        `${this.keycloakUrl}/admin/realms/${this.realm}/users/${userId}/role-mappings/realm`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+          data: [roleResponse.data],
+        },
+      );
+    } catch (error: any) {
+      // Don't throw error if role doesn't exist or wasn't assigned
+      console.log('Note: Could not remove role', roleName, 'from user', userId);
+    }
+  }
+
+  /**
+   * Assign a role to a user (replaces existing application roles)
+   */
+  async assignRole(userId: string, roleName: string): Promise<void> {
+    const token = await this.getAdminToken();
+
+    try {
+      // List of all application roles
+      const appRoles = [
+        'hq_admin',
+        'hq_compliance',
+        'hq_bdm',
+        'cell_admin',
+        'cell_solicitor',
+        'cell_paralegal',
+        'funder',
+        'insurer',
+      ];
+
+      // Remove all existing application roles first
+      for (const role of appRoles) {
+        if (role !== roleName) {
+          await this.removeRole(userId, role);
+        }
+      }
+
+      // Get new role representation
+      const roleResponse = await axios.get(
+        `${this.keycloakUrl}/admin/realms/${this.realm}/roles/${roleName}`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        },
+      );
+
+      // Assign new role to user
       await axios.post(
         `${this.keycloakUrl}/admin/realms/${this.realm}/users/${userId}/role-mappings/realm`,
         [roleResponse.data],

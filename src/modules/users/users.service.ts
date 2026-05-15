@@ -5,6 +5,11 @@ import { CreateUserDto } from "./dto/create-user.dto";
 import { UpdateUserDto } from "./dto/update-user.dto";
 import { UserRole, ConsentStatus, OnboardingStatus, ClientType } from "./entities/user.entity";
 
+interface UserContext {
+  keycloakId: string;
+  role: UserRole;
+}
+
 @Injectable()
 export class UsersService {
   constructor(
@@ -12,7 +17,7 @@ export class UsersService {
     private keycloakAdmin: KeycloakAdminService,
   ) {}
 
-  async create(createUserDto: CreateUserDto, _createdByKeycloakId?: string): Promise<any> {
+  async create(createUserDto: CreateUserDto, createdByKeycloakId: string): Promise<any> {
     // Create user in Keycloak first
     const nameParts = createUserDto.full_name.split(" ");
     const firstName = nameParts[0] || "";
@@ -30,7 +35,7 @@ export class UsersService {
     // Assign role in Keycloak
     await this.keycloakAdmin.assignRole(keycloakUserId, createUserDto.role);
 
-    // Create user in database
+    // Create user in database with creator reference
     const user = await this.prisma.user.create({
       data: {
         keycloakId: keycloakUserId,
@@ -49,6 +54,7 @@ export class UsersService {
         clientType: createUserDto.client_type as ClientType || null,
         vulnerabilityFlag: createUserDto.vulnerability_flag || false,
         preferredContactMethod: createUserDto.preferred_contact_method || null,
+        creatorKeycloakId: createdByKeycloakId,
       },
       include: { cell: true },
     });
@@ -56,18 +62,42 @@ export class UsersService {
     return user;
   }
 
-  async findAll(params?: {
-    page?: number;
-    limit?: number;
-    search?: string;
-    role?: string;
-    cellId?: string;
-  }): Promise<{ data: any[]; meta: { total: number; page: number; limit: number; totalPages: number } }> {
+  async findAll(
+    params?: {
+      page?: number;
+      limit?: number;
+      search?: string;
+      role?: string;
+      cellId?: string;
+    },
+    userContext?: UserContext,
+  ): Promise<{ data: any[]; meta: { total: number; page: number; limit: number; totalPages: number } }> {
     const page = params?.page || 1;
     const limit = params?.limit || 10;
     const skip = (page - 1) * limit;
 
     const where: any = {};
+
+    // Apply creator filtering based on user role
+    if (userContext) {
+      if (userContext.role === UserRole.HQ_ADMIN) {
+        // HQ Admin can see users created by all HQ admins
+        // Get all HQ admin keycloakIds
+        const hqAdmins = await this.prisma.user.findMany({
+          where: { role: UserRole.HQ_ADMIN },
+          select: { keycloakId: true },
+        });
+        const hqAdminIds = hqAdmins.map((admin) => admin.keycloakId);
+        where.creatorKeycloakId = { in: hqAdminIds };
+      } else {
+        // Other roles can only see users they created
+        where.creatorKeycloakId = userContext.keycloakId;
+      }
+    } else {
+      // No context provided - show all (for backwards compatibility with internal calls)
+    }
+
+    // Apply search filter
     if (params?.search) {
       where.OR = [
         { email: { contains: params.search, mode: "insensitive" } },
@@ -75,9 +105,11 @@ export class UsersService {
         { clientName: { contains: params.search, mode: "insensitive" } },
       ];
     }
+    // Apply role filter
     if (params?.role) {
       where.role = params.role;
     }
+    // Apply cellId filter
     if (params?.cellId) {
       where.cellId = params.cellId;
     }

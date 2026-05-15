@@ -3,6 +3,7 @@ import { randomBytes } from 'crypto';
 import { PrismaService } from '../../database/prisma.service';
 import { KeycloakAdminService } from './keycloak-admin.service';
 import { RegisterUserDto } from './dto/register-user.dto';
+import { UpdateUserDto } from './dto/update-user.dto';
 import { CreateInvitationDto } from './dto/create-invitation.dto';
 import { AcceptInvitationDto } from './dto/accept-invitation.dto';
 import { PublicSignupDto } from './dto/public-signup.dto';
@@ -24,6 +25,18 @@ export class RegistrationService {
     const validRoles = Object.values(UserRole);
     if (!validRoles.includes(dto.role as UserRole)) {
       throw new BadRequestException('Invalid role specified');
+    }
+
+    // Check if user already exists in our database
+    const existingUser = await this.prisma.user.findUnique({
+      where: { email: dto.email },
+    });
+
+    if (existingUser) {
+      throw new HttpException(
+        'User already exists with this email',
+        HttpStatus.CONFLICT,
+      );
     }
 
     // Create user in Keycloak
@@ -393,5 +406,84 @@ export class RegistrationService {
     return this.prisma.pendingUser.count({
       where: { status: 'pending' },
     });
+  }
+
+  /**
+   * Update user
+   */
+  async updateUser(userId: string, dto: UpdateUserDto) {
+    // Find user in database
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+    });
+
+    if (!user) {
+      throw new BadRequestException('User not found');
+    }
+
+    // Update in Keycloak
+    const updates: any = {};
+    if (dto.email) updates.email = dto.email;
+    if (dto.firstName || dto.lastName) {
+      if (dto.firstName) updates.firstName = dto.firstName;
+      if (dto.lastName) updates.lastName = dto.lastName;
+    }
+
+    if (Object.keys(updates).length > 0) {
+      await this.keycloakAdmin.updateUser(user.keycloakId, updates);
+    }
+
+    // Update role if changed
+    if (dto.role && dto.role !== user.role) {
+      await this.keycloakAdmin.assignRole(user.keycloakId, dto.role);
+    }
+
+    // Update in database
+    const updatedUser = await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        email: dto.email || user.email,
+        fullName: (dto.firstName && dto.lastName) 
+          ? `${dto.firstName} ${dto.lastName}`
+          : user.fullName,
+        role: (dto.role as UserRole) || user.role,
+      },
+    });
+
+    return {
+      message: 'User updated successfully',
+      user: updatedUser,
+    };
+  }
+
+  /**
+   * Delete user (from both Keycloak and database)
+   */
+  async deleteUser(userId: string) {
+    // Find user in database
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+    });
+
+    if (!user) {
+      throw new BadRequestException('User not found');
+    }
+
+    // Delete from Keycloak
+    try {
+      await this.keycloakAdmin.deleteUser(user.keycloakId);
+    } catch (error) {
+      console.error('Failed to delete user from Keycloak:', error);
+      // Continue with database deletion even if Keycloak deletion fails
+    }
+
+    // Delete from database
+    await this.prisma.user.delete({
+      where: { id: userId },
+    });
+
+    return {
+      message: 'User deleted successfully',
+    };
   }
 }

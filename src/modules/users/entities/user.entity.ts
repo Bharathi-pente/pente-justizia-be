@@ -97,4 +97,7 @@ export class User extends BaseEntity {
 
   @Column({ type: "varchar", nullable: true })
   preferred_contact_method: string | null;
+
+  @Column({ type: "varchar", nullable: true })
+  creator_keycloak_id: string | null;
 }

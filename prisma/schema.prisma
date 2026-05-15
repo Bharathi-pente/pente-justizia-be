@@ -94,6 +94,7 @@ model User {
   fundedCellIds         String[]         @map("funded_cell_ids")
   createdAt             DateTime         @default(now()) @map("created_at")
   updatedAt             DateTime         @updatedAt @map("updated_at")
+  creatorKeycloakId    String?          @map("creator_keycloak_id")  // keycloakId of admin who created this user
 
   // Client / Contact Variables
   clientName            String?          @map("client_name")
@@ -110,12 +111,14 @@ model User {
 
   // Relations
   cell                  Cell?            @relation(fields: [cellId], references: [id])
+  creator               User?            @relation("UserCreatedBy", fields: [creatorKeycloakId], references: [keycloakId])
   casesCreated          Case[]           @relation("CaseCreatedBy")
   auditSchedulesCreated AuditSchedule[]  @relation("AuditScheduleCreatedBy")
   complianceIssues      ComplianceIssue[]
   auditReports          AuditReport[]
   invitationsSent       Invitation[]      @relation("InvitationsSent")
   approvedUsers         PendingUser[]    @relation("UserApprovals")
+  createdUsers          User[]           @relation("UserCreatedBy")
 
   @@map("users")
 }

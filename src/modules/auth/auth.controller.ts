@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Body, Param, Request, UseGuards } from "@nestjs/common";
+import { Controller, Get, Post, Put, Delete, Body, Param, Request, UseGuards } from "@nestjs/common";
 import { AuthService } from "./auth.service";
 import { RegistrationService } from "./registration.service";
 import { KeycloakAuthGuard } from "../../common/guards/keycloak-auth.guard";
@@ -8,6 +8,7 @@ import { Public } from "../../common/decorators/public.decorator";
 import { RequestWithUser } from "../../common/types/request-with-user.types";
 import { UserProfileDto } from "./dto/user-profile.dto";
 import { RegisterUserDto } from "./dto/register-user.dto";
+import { UpdateUserDto } from "./dto/update-user.dto";
 import { CreateInvitationDto } from "./dto/create-invitation.dto";
 import { AcceptInvitationDto } from "./dto/accept-invitation.dto";
 import { PublicSignupDto } from "./dto/public-signup.dto";
@@ -164,5 +165,30 @@ export class AuthController {
     @Request() req: RequestWithUser,
   ) {
     return this.registrationService.rejectPendingUser(req.user.sub, id, body.reason);
+  }
+
+  /**
+   * PUT /auth/users/:id
+   * Update user (HQ admin only)
+   */
+  @Put("users/:id")
+  @UseGuards(KeycloakAuthGuard, RolesGuard)
+  @Roles("hq_admin")
+  async updateUser(
+    @Param("id") id: string,
+    @Body() dto: UpdateUserDto,
+  ) {
+    return this.registrationService.updateUser(id, dto);
+  }
+
+  /**
+   * DELETE /auth/users/:id
+   * Delete user (HQ admin only)
+   */
+  @Delete("users/:id")
+  @UseGuards(KeycloakAuthGuard, RolesGuard)
+  @Roles("hq_admin")
+  async deleteUser(@Param("id") id: string) {
+    return this.registrationService.deleteUser(id);
   }
 }
